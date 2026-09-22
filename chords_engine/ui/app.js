@@ -371,10 +371,10 @@ function renderSheet(el, d, stage) {
   if (!stage) bindSheet(el);
 }
 function lineOps(ln, li) {
-  return `<div class="lineops">${ln.type === "lyric" ? `<button data-op="text" data-li="${li}" title="עריכת טקסט">✎</button><button data-op="merge" data-li="${li}" title="איחוד עם השורה הבאה">⤓</button>` : ""}
-    <button data-op="add" data-li="${li}" title="שורה חדשה אחרי זו">＋</button><button data-op="del" data-li="${li}" title="מחיקת השורה">🗑</button></div>`;
+  return `<div class="lineops" contenteditable="false"><button data-op="add" data-li="${li}" title="שורה חדשה אחרי זו">＋</button><button data-op="del" data-li="${li}" title="מחיקת השורה">🗑</button></div>`;
 }
 function lineHtml(ln, li, mode) {
+  const ed = S.edit && mode !== "chords";
   if (ln.type === "instrumental") {
     const cells = [];
     ln.chords.forEach((c, ci) => {
@@ -382,6 +382,7 @@ function lineHtml(ln, li, mode) {
       const barLen = (c.duration || 0) / bars;
       for (let b = 0; b < bars; b++) cells.push(`<span class="bar1 c" data-li="${li}" data-ci="${ci}" data-time="${(c.time + b * barLen).toFixed(2)}">${b ? "%" : esc(c.name)}</span>`);
     });
+    if (S.edit) cells.push(`<span class="bar1 addbar" data-li="${li}" title="הוספת אקורד">＋</span>`);
     return `<div class="inst">${cells.join("")}</div>`;
   }
   const text = ln.text || "", chords = [...ln.chords].map((c, ci) => ({ ...c, ci })).sort((a, b) => a.char - b.char);
@@ -395,12 +396,12 @@ function lineHtml(ln, li, mode) {
     while (i < b) {
       let j = i + 1; while (j < b && wordAt[j] === wordAt[i]) j++;
       const wi = wordAt[i];
-      out += `<span class="w${low.has(wi) && wi >= 0 ? " low" : ""}" data-w="${wi}" data-c="${i}" data-li="${li}">${esc(text.slice(i, j))}</span>`;
+      out += `<span class="w${low.has(wi) && wi >= 0 && !ed ? " low" : ""}" data-w="${wi}" data-c="${i}" data-li="${li}">${esc(text.slice(i, j))}</span>`;
       i = j;
     }
     return out;
   };
-  if (mode === "inline") {
+  if (mode === "inline" && !ed) {
     let out = "", pos = 0;
     for (const c of chords) { out += piece(pos, Math.min(c.char, text.length)); out += `<span class="c" data-li="${li}" data-ci="${c.ci}" data-time="${c.time}">[${esc(c.name)}]</span>`; pos = Math.min(c.char, text.length); }
     return `<div class="inline">${out + piece(pos, text.length)}</div>`;
@@ -411,9 +412,10 @@ function lineHtml(ln, li, mode) {
     const b = k + 1 < bounds.length ? bounds[k + 1] : text.length;
     const here = chords.filter(c => Math.min(c.char, text.length) === a);
     const lab = here.map(c => `<span class="c${c.carried ? " carried" : ""}" data-li="${li}" data-ci="${c.ci}" data-time="${c.time}">${esc(c.name)}</span>`).join(" ");
-    out += `<span class="seg"><span class="cwrap">${lab || `<span class="c">&nbsp;</span>`}</span><span class="t">${piece(a, b) || "&nbsp;"}</span></span>`;
+    out += `<span class="seg"><span class="cwrap"${ed ? ' contenteditable="false"' : ""}>${lab || `<span class="c">&nbsp;</span>`}</span><span class="t">${piece(a, b) || (ed ? "" : "&nbsp;")}</span></span>`;
   });
-  return `<div class="lyr">${out}</div>`;
+  // במצב עריכה: אותו מראה, אבל השורה עצמה ניתנת להקלדה
+  return `<div class="lyr"${ed ? ` contenteditable="true" spellcheck="false" data-li="${li}"` : ""}>${out}</div>`;
 }
 function bindSheet(el) {
   el.querySelectorAll("[data-loopsec]").forEach(b => b.onclick = e => { e.stopPropagation(); loopSection(b.dataset.loopsec); });
@@ -422,10 +424,14 @@ function bindSheet(el) {
   });
   el.querySelectorAll("[data-op]").forEach(b => b.onclick = e => { e.stopPropagation(); lineOp(b.dataset.op, +b.dataset.li); });
   el.onpointerdown = sheetPointerDown;
-  el.ondblclick = e => { if (!S.edit) return; const l = e.target.closest(".line"); if (l && S.song.lines[+l.dataset.li].type === "lyric") lineOp("text", +l.dataset.li); };
+  el.oninput = e => { const l = e.target.closest && e.target.closest(".lyr[data-li]"); if (l) typed(+l.dataset.li, l); };
+  el.onkeydown = lyrKey;
 }
 
-// קליק רגיל: קפיצה בנגן. במצב עריכה: לחיצה על אקורד = חלון, גרירה = הזזה, לחיצה על אות = הוספה
+// ---- מצב רגיל: קליק = קפיצה בנגן.  מצב עריכה (אותו מראה):
+//   הקלדה ישירה בשורה · לחיצה על אקורד = הקלדת אקורד במקומו · גרירת אקורד = הזזה
+//   לחיצה על המקום הריק מעל אות = אקורד חדש שם · "[" בזמן הקלדה = אקורד חדש בסמן
+//   Enter = פיצול שורה · Backspace בתחילת שורה = איחוד עם הקודמת
 let drag = null;
 function sheetPointerDown(e) {
   const c = e.target.closest(".c[data-ci]"), w = e.target.closest("[data-c]");
@@ -434,13 +440,22 @@ function sheetPointerDown(e) {
     if (t != null && !isNaN(t)) seekSong(t);
     return;
   }
+  if (e.target.closest("input.chin")) return;
+  const add = e.target.closest(".addbar");
+  if (add) { e.preventDefault(); return addInstrumentalChord(+add.dataset.li); }
   if (c) {
     drag = { li: +c.dataset.li, ci: +c.dataset.ci, x: e.clientX, y: e.clientY, el: c, moved: false };
     document.addEventListener("pointermove", dragMove); document.addEventListener("pointerup", dragUp, { once: true });
     e.preventDefault();
-  } else if (w || e.target.closest(".t")) {
-    const pos = charFromPoint(e.clientX, e.clientY);
-    if (pos) editChord({ li: pos.li, char: pos.char });
+    return;
+  }
+  const cw = e.target.closest(".cwrap");
+  if (cw) {                                   // מקום ריק בשורת האקורדים -> אקורד חדש מעל האות שמתחת
+    e.preventDefault();
+    const lyr = cw.closest(".lyr"), t = cw.parentElement.querySelector(".t");
+    const y = (t && t.textContent ? t : lyr).getBoundingClientRect().bottom - 6;
+    const pos = charFromPoint(e.clientX, y, lyr);
+    if (pos) insertChordAt(pos.li, pos.char);
   }
 }
 function dragMove(e) { if (drag && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 5) { drag.moved = true; drag.el.classList.add("dragging"); } }
@@ -448,8 +463,11 @@ function dragUp(e) {
   document.removeEventListener("pointermove", dragMove);
   const d = drag; drag = null; if (!d) return;
   d.el.classList.remove("dragging");
-  if (!d.moved) return editChord({ li: d.li, ci: d.ci });
-  const pos = charFromPoint(e.clientX, e.clientY); if (!pos) return;
+  if (!d.moved) return openChordInput(d.li, d.ci);
+  const hit = document.elementFromPoint(e.clientX, e.clientY);
+  const lyr = hit && hit.closest(".lyr[data-li]");
+  const pos = lyr && charFromPoint(e.clientX, lyr.getBoundingClientRect().bottom - 6, lyr);
+  if (!pos) return;
   const src = S.song.lines[d.li], dst = S.song.lines[pos.li];
   if (src.type !== "lyric" || dst.type !== "lyric") return;
   pushUndo();
@@ -459,20 +477,146 @@ function dragUp(e) {
   dst.chords.push(ch);
   afterEdit();
 }
-function charFromPoint(x, y) {
+// מספר האות בשורה (לא כולל טקסט האקורדים) בנקודה על המסך
+const textOnly = lyr => document.createTreeWalker(lyr, NodeFilter.SHOW_TEXT,
+  { acceptNode: t => t.parentElement.closest(".cwrap") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+function charFromPoint(x, y, lyr) {
   const r = document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) : null;
-  let el = r && r.startContainer.nodeType === 3 ? r.startContainer.parentElement : document.elementFromPoint(x, y);
-  const w = el && el.closest("[data-c]");
-  if (w) return { li: +w.dataset.li, char: +w.dataset.c + (r && r.startContainer.parentElement === w ? r.startOffset : 0) };
-  const line = el && el.closest(".line");
-  if (line) return { li: +line.dataset.li, char: 0 };
-  return null;
+  if (!r || !lyr || !lyr.contains(r.startContainer)) return lyr ? { li: +lyr.dataset.li, char: 0 } : null;
+  return { li: +lyr.dataset.li, char: offsetIn(lyr, r.startContainer, r.startOffset) };
+}
+function offsetIn(lyr, node, off) {
+  if (node.nodeType === 1) {                  // הסמן על אלמנט: סופרים עד הילד ה-off
+    const kids = [...node.childNodes];
+    if (off < kids.length) { node = kids[off]; off = 0; while (node.firstChild) node = node.firstChild; }
+    else { let last = node; while (last.lastChild) last = last.lastChild; node = last; off = (last.textContent || "").length; }
+  }
+  let n = 0;
+  const walk = textOnly(lyr);
+  for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+    if (t === node) return n + off;
+    n += t.textContent.length;
+  }
+  return n;
+}
+function caretChar(lyr) {
+  const s = getSelection(); if (!s.rangeCount) return 0;
+  const r = s.getRangeAt(0); return lyr.contains(r.startContainer) ? offsetIn(lyr, r.startContainer, r.startOffset) : 0;
+}
+function setCaret(lyr, char) {
+  lyr.focus();
+  const walk = textOnly(lyr);
+  let n = 0, last = null;
+  const place = (t, o) => { const r = document.createRange(); r.setStart(t, o); r.collapse(true); const s = getSelection(); s.removeAllRanges(); s.addRange(r); };
+  for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+    last = t;
+    if (n + t.textContent.length >= char) return place(t, char - n);
+    n += t.textContent.length;
+  }
+  if (last) place(last, last.textContent.length);
+}
+// קריאת השורה מה-DOM אחרי הקלדה: הטקסט, ואיפה נמצא כל אקורד (תחילת המקטע שלו)
+function readLine(lyr) {
+  let text = "";
+  const pos = [];
+  for (const node of lyr.childNodes) {
+    if (node.nodeType === 1 && node.classList.contains("seg")) {
+      node.querySelectorAll(".cwrap .c[data-ci]").forEach(c => pos.push({ ci: +c.dataset.ci, char: text.length }));
+      for (const k of node.childNodes) if (!(k.nodeType === 1 && k.classList.contains("cwrap"))) text += k.textContent;
+    } else text += node.textContent || "";
+  }
+  return { text: text.replace(/ /g, " "), pos };
+}
+function typed(li, lyr) {
+  if (!S.typing) pushUndo();
+  clearTimeout(S.typing); S.typing = setTimeout(() => { S.typing = null; }, 1200);
+  const ln = S.song.lines[li], r = readLine(lyr);
+  if (r.text !== ln.text) { ln.text = r.text; delete ln.words; }
+  for (const p of r.pos) if (ln.chords[p.ci]) ln.chords[p.ci].char = p.char;
+  scheduleSave(true);
+}
+function lyrKey(e) {
+  const lyr = e.target.closest && e.target.closest(".lyr[data-li]"); if (!lyr) return;
+  const li = +lyr.dataset.li, lines = S.song.lines;
+  const key = e.key || { 13: "Enter", 8: "Backspace", 219: "[" }[e.keyCode] || "";
+  if (key === "Enter") {                        // פיצול השורה בסמן
+    e.preventDefault();
+    const ln = lines[li], c = caretChar(lyr); pushUndo();
+    const tail = ln.text.slice(c), lead = tail.length - tail.trimStart().length;
+    const moving = ln.chords.filter(x => x.char >= c && c > 0);
+    const b = { type: "lyric", text: tail.trimStart(), start: wordTimeAtChar(ln, c), end: ln.end, section: ln.section, stanza_break: false,
+      chords: moving.map(x => ({ ...x, char: Math.max(0, x.char - c - lead) })) };
+    ln.chords = ln.chords.filter(x => !moving.includes(x));
+    ln.text = ln.text.slice(0, c).trimEnd(); ln.end = b.start; delete ln.words;
+    lines.splice(li + 1, 0, b);
+    afterEdit(); focusLine(li + 1, 0);
+  } else if (key === "Backspace" && getSelection().isCollapsed && caretChar(lyr) === 0 && li > 0 && lines[li - 1].type === "lyric") {
+    e.preventDefault();                           // איחוד עם השורה הקודמת
+    const a = lines[li - 1], b = lines[li]; pushUndo();
+    const off = a.text ? a.text.length + 1 : 0;
+    a.chords.push(...b.chords.filter(c => !c.carried).map(c => ({ ...c, char: c.char + off })));
+    a.text = a.text ? a.text + " " + b.text : b.text; a.end = b.end; delete a.words; lines.splice(li, 1);
+    afterEdit(); focusLine(li - 1, Math.max(0, off - 1));
+  } else if (key === "[") {                     // אקורד חדש בנקודת הסמן
+    e.preventDefault();
+    insertChordAt(li, caretChar(lyr));
+  }
+}
+function focusLine(li, char) {
+  const lyr = $("sheet").querySelector(`.lyr[data-li="${li}"]`);
+  if (lyr) setCaret(lyr, char);
+}
+function insertChordAt(li, char) {
+  const ln = S.song.lines[li];
+  const prev = [...ln.chords].sort((a, b) => a.char - b.char).filter(c => c.char <= char).pop();
+  ln.chords.push({ name: "", char, time: wordTimeAtChar(ln, char), carried: false, _new: true });
+  renderSheet($("sheet"), S.song, false);
+  openChordInput(li, ln.chords.length - 1, prev ? prev.name : "");
+}
+function addInstrumentalChord(li) {
+  const ln = S.song.lines[li], last = ln.chords[ln.chords.length - 1];
+  const t = last ? last.time + (last.duration || 2) : ln.start;
+  ln.chords.push({ name: "", time: t, duration: last ? last.duration : 2, beats: last ? last.beats : 4, carried: false, _new: true });
+  renderSheet($("sheet"), S.song, false);
+  openChordInput(li, ln.chords.length - 1, last ? last.name : "");
+}
+// הקלדת אקורד במקום התווית עצמה (בלי חלון). ריק + Enter = מחיקה, Esc = ביטול
+function openChordInput(li, ci, suggestion) {
+  const el = $("sheet").querySelector(`.c[data-li="${li}"][data-ci="${ci}"]`); if (!el) return;
+  const ln = S.song.lines[li], ch = ln.chords[ci];
+  const inp = document.createElement("input");
+  inp.className = "chin"; inp.value = ch.name || ""; inp.placeholder = suggestion || "Am";
+  inp.dir = "ltr"; inp.spellcheck = false; inp.autocomplete = "off";
+  inp.size = Math.max(3, (ch.name || suggestion || "Am").length + 1);
+  el.replaceWith(inp); inp.focus(); inp.select();
+  let done = false;
+  const finish = async commit => {
+    if (done) return;
+    const v = inp.value.trim();
+    if (!commit) { done = true; if (ch._new) ln.chords.splice(ci, 1); return renderSheet($("sheet"), S.song, false); }
+    if (!v) { done = true; pushUndo(); ln.chords.splice(ci, 1); return afterEdit(); }
+    try { await api("GET", "/chord?name=" + encodeURIComponent(v)); }
+    catch (err) { inp.classList.add("bad"); inp.title = err.message; toast(err.message); inp.focus(); return; }
+    done = true;
+    if (v !== ch.name || ch._new) pushUndo();
+    Object.assign(ch, { name: v, carried: false }); delete ch._new;
+    afterEdit();
+  };
+  inp.oninput = () => { inp.classList.remove("bad"); inp.size = Math.max(3, inp.value.length + 1); };
+  inp.onkeydown = e => {
+    e.stopPropagation();
+    const k = e.key || { 13: "Enter", 9: "Tab", 27: "Escape" }[e.keyCode] || "";
+    if (k === "Enter" || k === "Tab") { e.preventDefault(); finish(true); }
+    else if (k === "Escape") { e.preventDefault(); finish(false); }
+  };
+  inp.onblur = () => setTimeout(() => finish(true), 150);
 }
 function wordTime(li, wi) { const ln = S.song.lines[li]; return ln && ln.words && ln.words[wi] ? ln.words[wi].start : ln && ln.start; }
 function wordTimeAtChar(ln, ch) { const w = (ln.words || []).filter(w => w.char <= ch).pop(); return w ? w.start : ln.start; }
 
 // ------------------------------------------------------------------ עריכה
 function setEdit(on) {
+  if (!on && S.saveTimer) saveNow();
   S.edit = on; document.body.classList.toggle("editing", on);
   $("btnEdit").classList.toggle("on", on); $("btnEdit").textContent = on ? "✓ סיום עריכה" : "✏️ עריכה";
   if (S.song) renderSheet($("sheet"), S.song, false);
@@ -480,101 +624,48 @@ function setEdit(on) {
 $("btnEdit").onclick = () => setEdit(!S.edit);
 function snapshot() { return JSON.stringify({ lines: S.song.lines, sections: S.song.sections, view: { transpose: S.v.transpose, capo: S.v.capo } }); }
 function pushUndo() { S.undo.push(snapshot()); if (S.undo.length > 100) S.undo.shift(); S.redo = []; }
-function restore(snap) { const s = JSON.parse(snap); S.song.lines = s.lines; S.song.sections = s.sections; saveNow(s.view); }
+function restore(snap) { const s = JSON.parse(snap); S.song.lines = s.lines; S.song.sections = s.sections; renderSheet($("sheet"), S.song, false); saveNow(s.view); }
 $("btnUndo").onclick = () => { if (!S.undo.length) return; S.redo.push(snapshot()); restore(S.undo.pop()); };
 $("btnRedo").onclick = () => { if (!S.redo.length) return; S.undo.push(snapshot()); restore(S.redo.pop()); };
 function afterEdit() { renderSheet($("sheet"), S.song, false); scheduleSave(); }
-function scheduleSave() { $("sSaved").textContent = "…"; clearTimeout(S.saveTimer); S.saveTimer = setTimeout(() => saveNow(), 700); }
+function scheduleSave(typing) { $("sSaved").textContent = "…"; clearTimeout(S.saveTimer); S.saveTimer = setTimeout(() => saveNow(), typing ? 1200 : 500); }
+function typingInSheet() { const a = document.activeElement; return a && $("sheet").contains(a) && (a.isContentEditable || a.tagName === "INPUT"); }
 async function saveNow(view) {
-  clearTimeout(S.saveTimer);
+  clearTimeout(S.saveTimer); S.saveTimer = null;
   const body = {
     view: view || { transpose: S.v.transpose, capo: S.v.capo },
     sections: S.song.sections,
-    lines: S.song.lines.map(l => ({ id: l.id, type: l.type, role: l.role, section: l.section, start: l.start, end: l.end, text: l.text, words: l.words, stanza_break: l.stanza_break, chords: l.chords.map(c => ({ name: c.name, char: c.char, time: c.time, carried: c.carried, duration: c.duration, beats: c.beats })) })),
+    lines: S.song.lines.map(l => ({ id: l.id, type: l.type, role: l.role, section: l.section, start: l.start, end: l.end, text: l.text, words: l.words, stanza_break: l.stanza_break,
+      chords: l.chords.filter(c => c.name).map(c => ({ name: c.name, char: c.char, time: c.time, carried: c.carried, duration: c.duration, beats: c.beats })) })),
   };
   try {
     const sc = $("v-song").scrollTop;
     const v = await api("PUT", "/songs/" + S.songId, body);
-    if (view && (view.transpose !== S.v.transpose || view.capo !== S.v.capo)) await reloadSong(); else { S.song = v; renderSong(); }
+    if (view && (view.transpose !== S.v.transpose || view.capo !== S.v.capo)) await reloadSong();
+    else if (typingInSheet()) {
+      // המשתמש עדיין מקליד: מעדכנים נתונים בלי לצייר מחדש (שהסמן לא יקפוץ)
+      v.lines.forEach((l, i) => { const cur = S.song.lines[i]; if (cur && cur.type === l.type) { cur.words = l.words; cur.id = l.id; } });
+      S.song.chords_used = v.chords_used; S.song.timeline = v.timeline; renderDiagrams();
+      S.pendingRender = v;
+    } else { S.song = v; S.pendingRender = null; renderSong(); }
     $("v-song").scrollTop = sc;
     $("sSaved").textContent = "✓ נשמר";
   } catch (e) { $("sSaved").textContent = "⚠ לא נשמר"; toast("שמירה נכשלה: " + e.message, 5000); }
 }
-async function lineOp(op, li) {
+// כשיוצאים מהשורה — מציירים מחדש עם הנתונים מהשרת
+$("sheet").addEventListener("focusout", () => setTimeout(() => {
+  if (S.pendingRender && !typingInSheet() && !S.saveTimer) { const sc = $("v-song").scrollTop; S.song = S.pendingRender; S.pendingRender = null; renderSong(); $("v-song").scrollTop = sc; }
+}, 200));
+function lineOp(op, li) {
   const lines = S.song.lines, ln = lines[li];
-  if (op === "text") {
-    const t = await askText("טקסט השורה", ln.text); if (t == null) return;
-    pushUndo(); ln.text = t.trim(); ln.chords.forEach(c => c.char = Math.min(c.char, ln.text.length)); delete ln.words;
-  } else if (op === "add") {
-    const t = await askText("שורה חדשה", ""); if (t == null) return;
-    pushUndo(); lines.splice(li + 1, 0, { type: "lyric", text: t.trim(), chords: [], start: ln.end, end: ln.end + 2, section: ln.section, stanza_break: false });
-  } else if (op === "del") {
-    pushUndo(); lines.splice(li, 1);
-  } else if (op === "merge") {
-    const nx = lines.slice(li + 1).findIndex(l => l.type === "lyric"); if (nx < 0) return;
-    const b = lines[li + 1 + nx]; if (nx !== 0) return toast("אפשר לאחד רק עם שורת מילים צמודה");
-    pushUndo(); const off = ln.text.length + 1;
-    ln.chords.push(...b.chords.filter(c => !c.carried).map(c => ({ ...c, char: c.char + off })));
-    ln.text = ln.text + " " + b.text; ln.end = b.end; delete ln.words; lines.splice(li + 1, 1);
-  }
-  afterEdit();
-}
-
-// חלון אקורד
-let chordCtx = null, vocab = null;
-async function editChord(ctx) {
-  chordCtx = ctx;
-  if (!vocab) vocab = await api("GET", "/chords/vocabulary");
-  const ln = S.song.lines[ctx.li]; const cur = ctx.ci != null ? ln.chords[ctx.ci] : null;
-  const flats = S.v.accidentals === "flats" || (S.v.accidentals === "auto" && /b/.test(S.song.meta.shape_key || ""));
-  $("chTitle").textContent = cur ? "החלפת אקורד" : "הוספת אקורד";
-  $("chDel").classList.toggle("hidden", !cur);
-  $("chRoots").innerHTML = vocab.roots.map(r => `<button data-root="${flats ? r.flat : r.sharp}">${flats ? r.flat : r.sharp}</button>`).join("");
-  $("chQual").innerHTML = vocab.qualities.map(q => `<button data-suffix="${esc(q.suffix)}">${q.suffix || "מז'ור"}</button>`).join("");
-  $("chBass").innerHTML = `<option value="">—</option>` + vocab.roots.map(r => `<option>${flats ? r.flat : r.sharp}</option>`).join("");
-  const parts = { root: "C", suffix: "", bass: "" };
-  const lastName = cur ? cur.name : (ln.chords.filter(c => c.char <= ctx.char).pop() || {}).name;
-  if (lastName) {
-    const info = await api("GET", "/chord?name=" + encodeURIComponent(lastName) + (flats ? "&accidentals=flats" : "")).catch(() => null);
-    if (info) { const m = info.name.match(/^([A-G][#b]?)(.*?)(?:\/([A-G][#b]?))?$/); if (m) { parts.root = m[1]; parts.suffix = m[2]; parts.bass = m[3] || ""; } }
-  }
-  const upd = async () => {
-    $("chRoots").querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.root === parts.root));
-    $("chQual").querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.suffix === parts.suffix));
-    $("chBass").value = parts.bass;
-    $("chText").value = parts.root + parts.suffix + (parts.bass ? "/" + parts.bass : "");
-    await preview($("chText").value);
-  };
-  $("chRoots").onclick = e => { if (e.target.dataset.root) { parts.root = e.target.dataset.root; upd(); } };
-  $("chQual").onclick = e => { if (e.target.dataset.suffix !== undefined) { parts.suffix = e.target.dataset.suffix; upd(); } };
-  $("chBass").onchange = () => { parts.bass = $("chBass").value; upd(); };
-  $("chText").oninput = () => preview($("chText").value);
-  await upd();
-  $("dlgChord").showModal();
-}
-async function preview(name) {
-  try {
-    const info = await api("GET", "/chord?name=" + encodeURIComponent(name));
-    $("chErr").textContent = "";
-    $("chPreview").innerHTML = `<div class="big">${esc(name)}</div>` + (info.guitar[0] ? guitarSvg(info.guitar[0]) : "") + pianoSvg(info.piano);
-    return true;
-  } catch (e) { $("chErr").textContent = e.message; $("chPreview").innerHTML = ""; return false; }
-}
-$("chCancel").onclick = () => $("dlgChord").close();
-$("chOk").onclick = async () => {
-  const name = $("chText").value.trim();
-  if (!await preview(name)) return;
-  $("dlgChord").close();
   pushUndo();
-  const ln = S.song.lines[chordCtx.li];
-  if (chordCtx.ci != null) Object.assign(ln.chords[chordCtx.ci], { name, carried: false });
-  else ln.chords.push({ name, char: chordCtx.char, time: wordTimeAtChar(ln, chordCtx.char), carried: false });
+  if (op === "add") {
+    lines.splice(li + 1, 0, { type: "lyric", text: "", chords: [], start: ln.end, end: ln.end + 2, section: ln.section, stanza_break: false });
+    afterEdit(); return focusLine(li + 1, 0);
+  }
+  if (op === "del") lines.splice(li, 1);
   afterEdit();
-};
-$("chDel").onclick = () => {
-  $("dlgChord").close(); pushUndo();
-  S.song.lines[chordCtx.li].chords.splice(chordCtx.ci, 1); afterEdit();
-};
+}
 
 // מילים
 $("btnLyrics").onclick = () => {
@@ -880,10 +971,14 @@ renderSong = function () { _renderSong(); if (!$("stage").classList.contains("hi
 
 // ------------------------------------------------------------------ מקלדת
 document.addEventListener("keydown", e => {
-  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || document.querySelector("dialog[open]");
+  const ae = document.activeElement;
+  const typing = /INPUT|TEXTAREA|SELECT/.test(ae.tagName) || ae.isContentEditable || document.querySelector("dialog[open]");
+  const inChordBox = ae.classList && ae.classList.contains("chin");
   if (e.ctrlKey && e.key.toLowerCase() === "s") { e.preventDefault(); if (S.song && S.edit) saveNow(); return; }
-  if (e.ctrlKey && e.key.toLowerCase() === "z" && S.edit && !typing) { e.preventDefault(); $("btnUndo").onclick(); return; }
-  if (e.ctrlKey && e.key.toLowerCase() === "y" && S.edit && !typing) { e.preventDefault(); $("btnRedo").onclick(); return; }
+  // Ctrl+Z/Y בעריכה: ההיסטוריה של התוכנה (גם בזמן הקלדה בשורה), לא של הדפדפן
+  const lk = e.key.toLowerCase();
+  if (e.ctrlKey && (lk === "z" || lk === "ז") && S.edit && !inChordBox) { e.preventDefault(); if (S.saveTimer) saveNow(); $("btnUndo").onclick(); return; }
+  if (e.ctrlKey && (lk === "y" || lk === "ט") && S.edit && !inChordBox) { e.preventDefault(); $("btnRedo").onclick(); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "f") { e.preventDefault(); show("library"); $("search").focus(); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "p" && S.song) { e.preventDefault(); show("song"); setTimeout(() => window.print(), 50); return; }
   if (typing) return;

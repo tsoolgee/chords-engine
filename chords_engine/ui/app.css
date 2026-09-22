@@ -194,3 +194,14 @@ dialog textarea { width: 100%; min-width: 520px; direction: rtl; }
   body { background: #fff; color: #000; } .facts span:last-child { display: none; }
 }
 table.songs .cover { width: 34px; height: 34px; font-size: 15px; border-radius: 5px; }
+
+/* עריכה במקום */
+body.editing .lyr[contenteditable] { outline: none; border-radius: 6px; cursor: text; min-height: 2.4em; }
+body.editing .line:hover .lyr, body.editing .lyr:focus-within { background: color-mix(in srgb, var(--accent-weak) 60%, transparent); }
+body.editing .cwrap { cursor: copy; min-width: .6em; }
+body.editing .seg .c[data-ci] { cursor: grab; }
+body.editing .lyr:empty::after, body.editing .lyr .t:empty { min-width: 1em; }
+input.chin { font: inherit; font-size: .85em; font-weight: 700; color: var(--chord); background: var(--panel); border: none; border-bottom: 2px solid var(--chord);
+  border-radius: 0; padding: 0 2px; line-height: 1.2; direction: ltr; outline: none; }
+input.chin.bad { border-bottom-color: var(--danger); background: #fde2e2; }
+.addbar { color: var(--muted); border-style: dashed !important; cursor: pointer; }

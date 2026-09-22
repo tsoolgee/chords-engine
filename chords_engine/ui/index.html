@@ -83,7 +83,7 @@
         <button id="btnStage" class="primary">🎤 מצב נגינה</button>
       </div>
 
-      <div id="editHint" class="edithint editonly">מצב עריכה: לחיצה על אקורד — החלפה/מחיקה · לחיצה על אות — הוספת אקורד · גרירת אקורד — הזזה · לחיצה כפולה על שורה — עריכת טקסט · הכפתורים בצד השורה — הוספה/מחיקה/איחוד</div>
+      <div id="editHint" class="edithint editonly">מצב עריכה — מקלידים ישר על הדף: <b>מילים</b> — כמו במסמך (Enter מפצל שורה, Backspace בתחילת שורה מאחד) · <b>אקורד</b> — לחיצה עליו ומקלידים (ריק = מחיקה, Esc = ביטול) · <b>אקורד חדש</b> — לחיצה על המקום הריק מעל האות, או המקש [ בזמן הקלדה · <b>הזזה</b> — גרירת האקורד · Ctrl+Z ביטול</div>
       <div id="wave" class="wave"><canvas id="waveCanvas"></canvas></div>
       <div class="songbody">
         <div id="sheet" class="sheet"></div>
@@ -166,20 +166,7 @@
   <div class="btns"><button id="impGo" class="primary">הוסף</button><button id="impCancel">ביטול</button></div>
 </dialog>
 
-<dialog id="dlgChord">
-  <h2 id="chTitle">אקורד</h2>
-  <div class="chordedit">
-    <div>
-      <div class="lbl">שורש</div><div id="chRoots" class="grid12"></div>
-      <div class="lbl">סוג</div><div id="chQual" class="qualgrid"></div>
-      <div class="lbl">בס (לא חובה)</div><select id="chBass"></select>
-      <div class="lbl">או הקלדה חופשית</div><input id="chText" placeholder="Am7/G">
-      <div id="chErr" class="err"></div>
-    </div>
-    <div id="chPreview" class="chpreview"></div>
-  </div>
-  <div class="btns"><button id="chOk" class="primary">אישור</button><button id="chDel" class="danger">מחיקה</button><button id="chCancel">ביטול</button></div>
-</dialog>
+
 
 <dialog id="dlgLyrics">
   <h2>הדבקת המילים הנכונות</h2>
