@@ -1,0 +1,10 @@
+# מנוע האקורדים (Python 3.10+). torch נמשך דרך lv-chordia; בלי GPU זה ה-CPU build.
+lv-chordia>=1.1.0
+librosa>=0.11
+soundfile>=0.12
+numpy>=1.24
+av>=12
+pywebview>=5
+# בנייה: pyinstaller
+# אופציונלי: הפרדת שירה לפני התמלול
+# demucs

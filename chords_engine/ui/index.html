@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>אקורדים</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="app">
+  <nav id="side">
+    <div class="brand">🎸 אקורדים</div>
+    <button class="nav" data-view="library">📚 ספרייה</button>
+    <button class="nav" data-view="song" id="navSong" disabled>🎵 השיר הפתוח</button>
+    <button class="nav" data-view="artists">👤 אמנים</button>
+    <button class="nav" data-view="albums">💿 אלבומים</button>
+    <button class="nav" data-view="folders">📁 תיקיות</button>
+    <button class="nav" data-view="queue">▤ תור נגינה</button>
+    <button class="nav" data-view="settings">⚙ הגדרות</button>
+    <div id="jobs"></div>
+    <div id="engineState" class="muted small"></div>
+  </nav>
+
+  <main id="main">
+    <!-- ספרייה / אמנים / אלבומים / תיקיות -->
+    <section id="v-library" class="view">
+      <header class="bar">
+        <h1 id="libTitle">ספרייה</h1>
+        <input id="search" type="search" placeholder="🔎 חיפוש שיר, אמן, אלבום, מילים…">
+        <button id="btnAddFiles" class="primary">＋ הוספת שירים</button>
+        <button id="btnAddFolder">📁 הוספת תיקייה</button>
+      </header>
+      <div id="crumbs" class="crumbs"></div>
+      <div id="libBody"></div>
+      <div id="dropHint" class="drop">גרור לכאן קבצי שמע או וידאו</div>
+    </section>
+
+    <!-- שיר -->
+    <section id="v-song" class="view">
+      <header class="songhead">
+        <div id="cover" class="cover big"></div>
+        <div class="songinfo">
+          <h1 id="sTitle" class="editable" title="לחץ לעריכה"></h1>
+          <div id="sArtist" class="editable muted" title="לחץ לעריכה"></div>
+          <div class="facts">
+            <span>סולם <b id="sKey"></b><span id="sKeyOrig" class="muted"></span></span>
+            <span>BPM <b id="sBpm"></b></span>
+            <span id="sCapoInfo"></span>
+            <span id="sSaved" class="muted"></span>
+          </div>
+        </div>
+        <div class="nowchord" id="nowChord"><div class="lbl">אקורד נוכחי</div><div id="curChord">–</div><div class="next">הבא: <b id="nextChord">–</b></div></div>
+      </header>
+
+      <div id="analysisBanner" class="banner hidden">
+        <div class="row"><b id="abStage"></b><span id="abPct" class="muted"></span><button id="abCancel" class="small">ביטול</button></div>
+        <div class="progress"><div id="abBar"></div></div>
+        <div id="abBlocks" class="blocks"></div>
+      </div>
+
+      <div class="toolbar" id="toolbar">
+        <div class="grp" title="טרנספוזיציה (↑ ↓)">
+          <button id="tDown">−</button><span id="tVal" class="val">0</span><button id="tUp">+</button><span class="lbl">טון</span>
+        </div>
+        <div class="grp"><span class="lbl">קאפו</span><select id="capo"></select><span id="capoHint" class="hint"></span></div>
+        <div class="grp"><select id="simplify"><option value="basic">פשוט</option><option value="standard">רגיל</option><option value="full">מתקדם</option></select></div>
+        <div class="grp"><select id="notation"><option value="letters">Am</option><option value="solfege_he">לה m</option><option value="solfege">La m</option></select>
+          <select id="accidentals"><option value="auto">♯/♭ אוטו'</option><option value="sharps">♯</option><option value="flats">♭</option></select></div>
+        <div class="grp"><select id="mode"><option value="above">אקורדים מעל מילים</option><option value="inline">אקורדים בתוך הטקסט</option><option value="chords">אקורדים בלבד</option><option value="lyrics">מילים בלבד</option></select></div>
+        <div class="grp"><button id="fontDown">A−</button><button id="fontUp">A+</button></div>
+        <div class="grp"><label><input type="checkbox" id="autoscroll" checked> גלילה</label></div>
+        <span class="spacer"></span>
+        <button id="btnEdit">✏️ עריכה</button>
+        <button id="btnUndo" class="editonly" title="Ctrl+Z">↶</button><button id="btnRedo" class="editonly" title="Ctrl+Y">↷</button>
+        <button id="btnLyrics">📝 הדבקת מילים</button>
+        <div class="menu"><button>⤓ ייצוא</button><div class="menu-items">
+          <button data-exp="copy">העתקה ללוח</button><button data-exp="pdf">הדפסה / PDF</button>
+          <button data-exp="txt">טקסט (TXT)</button><button data-exp="chordpro">ChordPro</button>
+          <button data-exp="lrc">LRC</button><button data-exp="csv">CSV</button><button data-exp="json">JSON</button></div></div>
+        <div class="menu"><button>⋯</button><div class="menu-items">
+          <button id="btnReanalyze">🧠 ניתוח מחדש</button><button id="btnReset">↺ חזרה לזיהוי המקורי</button>
+          <button id="btnShowFile">📂 הצג קובץ</button></div></div>
+        <button id="btnStage" class="primary">🎤 מצב נגינה</button>
+      </div>
+
+      <div id="editHint" class="edithint editonly">מצב עריכה: לחיצה על אקורד — החלפה/מחיקה · לחיצה על אות — הוספת אקורד · גרירת אקורד — הזזה · לחיצה כפולה על שורה — עריכת טקסט · הכפתורים בצד השורה — הוספה/מחיקה/איחוד</div>
+      <div id="wave" class="wave"><canvas id="waveCanvas"></canvas></div>
+      <div class="songbody">
+        <div id="sheet" class="sheet"></div>
+        <aside id="strip" class="strip">
+          <div class="striphead"><b>אקורדים בשיר</b>
+            <select id="instrument"><option value="guitar">גיטרה</option><option value="piano">פסנתר</option></select></div>
+          <div id="diagrams"></div>
+        </aside>
+      </div>
+      <video id="video" class="hidden" playsinline></video>
+    </section>
+
+    <section id="v-queue" class="view">
+      <header class="bar"><h1>תור נגינה</h1><button id="qClear">ניקוי</button></header>
+      <div id="queueList"></div>
+    </section>
+
+    <section id="v-settings" class="view">
+      <header class="bar"><h1>הגדרות</h1></header>
+      <div class="settings">
+        <label>ערכת צבעים <select id="setTheme"><option value="system">לפי המערכת</option><option value="light">בהיר</option><option value="dark">כהה</option></select></label>
+        <label>רמת ניתוח ברירת מחדל <select id="setLevel"><option value="fast">⚡ מהיר — אקורדים בלבד (~דקה)</option><option value="normal">⚖️ רגיל — אקורדים ומילים</option><option value="accurate">🎯 מדויק — תזמון מילים מדויק (איטי יותר)</option></select></label>
+        <label>צבע אקורדים <input type="color" id="setChordColor"></label>
+        <label>צבע סימון <input type="color" id="setMarkColor"></label>
+        <label>גופן <select id="setFont"><option value="'Segoe UI', Arial">Segoe UI</option><option value="Arial">Arial</option><option value="'David', serif">David</option><option value="'Narkisim', serif">Narkisim</option><option value="Consolas, monospace">Consolas</option></select></label>
+        <label>מרווח שורות <input type="range" id="setLine" min="1" max="2.4" step="0.1"></label>
+        <div id="sysInfo" class="muted small"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer id="player">
+    <div id="pCover" class="cover"></div>
+    <div class="pinfo"><div id="pTitle" class="ellipsis">לא מתנגן כלום</div><div id="pArtist" class="muted small ellipsis"></div></div>
+    <div class="pctl">
+      <button id="pShuffle" title="ערבוב">🔀</button>
+      <button id="pPrev" title="הקודם">⏮</button>
+      <button id="pPlay" class="play" title="נגן / עצור (רווח)">▶</button>
+      <button id="pStop" title="עצור">⏹</button>
+      <button id="pNext" title="הבא">⏭</button>
+      <button id="pRepeat" title="חזרה">🔁</button>
+    </div>
+    <div class="pseek"><span id="pCur">0:00</span><input type="range" id="pSeek" min="0" max="1000" value="0"><span id="pDur">0:00</span></div>
+    <div class="pextra">
+      <span class="lbl" title="מהירות בלי שינוי גובה הצליל">מהירות</span>
+      <button id="rateDown">−</button><span id="rateVal" class="val">100%</span><button id="rateUp">+</button>
+      <span id="bpmNow" class="muted small"></span>
+      <button id="loopA" title="נקודת התחלה ללופ">A</button><button id="loopB" title="נקודת סיום ללופ (L)">B</button><span id="loopInfo" class="small"></span>
+      <button id="pMute">🔊</button><input type="range" id="pVol" min="0" max="100" value="90">
+    </div>
+  </footer>
+</div>
+
+<!-- מצב נגינה -->
+<div id="stage" class="hidden">
+  <div class="stagebar">
+    <b id="stTitle"></b>
+    <span class="spacer"></span>
+    <div class="stchord"><span id="stCur">–</span><small>הבא: <b id="stNext">–</b></small></div>
+    <span class="spacer"></span>
+    <button id="stT-">טון −</button><button id="stT+">טון +</button>
+    <button id="stRate-">איטי</button><button id="stRate+">מהיר</button>
+    <button id="stFont-">A−</button><button id="stFont+">A+</button>
+    <button id="stMin" title="מצב הופעה — בלי סרגל">מינימלי</button>
+    <button id="stPlay">▶</button>
+    <button id="stClose">✕</button>
+  </div>
+  <div id="stSheet" class="sheet stagesheet"></div>
+</div>
+
+<!-- חלונות -->
+<dialog id="dlgImport">
+  <h2>הוספה לספרייה</h2>
+  <div id="impFiles" class="muted small"></div>
+  <label>רמת ניתוח
+    <select id="impLevel"><option value="fast">⚡ מהיר — אקורדים בלבד</option><option value="normal">⚖️ רגיל — אקורדים ומילים</option><option value="accurate">🎯 מדויק</option></select></label>
+  <label>תיקייה בספרייה <input id="impFolder" placeholder="למשל: הופעות/2026 (לא חובה)"></label>
+  <label><input type="checkbox" id="impAnalyze" checked> להתחיל לנתח מיד</label>
+  <p class="muted small">הניתוח רץ ברקע — אפשר להמשיך לעבוד ולנגן. שיר שכבר נותח נפתח מיד.</p>
+  <div class="btns"><button id="impGo" class="primary">הוסף</button><button id="impCancel">ביטול</button></div>
+</dialog>
+
+<dialog id="dlgChord">
+  <h2 id="chTitle">אקורד</h2>
+  <div class="chordedit">
+    <div>
+      <div class="lbl">שורש</div><div id="chRoots" class="grid12"></div>
+      <div class="lbl">סוג</div><div id="chQual" class="qualgrid"></div>
+      <div class="lbl">בס (לא חובה)</div><select id="chBass"></select>
+      <div class="lbl">או הקלדה חופשית</div><input id="chText" placeholder="Am7/G">
+      <div id="chErr" class="err"></div>
+    </div>
+    <div id="chPreview" class="chpreview"></div>
+  </div>
+  <div class="btns"><button id="chOk" class="primary">אישור</button><button id="chDel" class="danger">מחיקה</button><button id="chCancel">ביטול</button></div>
+</dialog>
+
+<dialog id="dlgLyrics">
+  <h2>הדבקת המילים הנכונות</h2>
+  <p class="muted small">שורה בטקסט = שורה בדף. שורה ריקה = בית חדש. המילים מיושרות לשיר תוך שניות, בלי ניתוח מחדש. ⚠ עריכות ידניות של השורות יוחלפו.</p>
+  <textarea id="lyText" rows="16"></textarea>
+  <div class="btns"><button id="lyGo" class="primary">יישור לשיר</button><button id="lyClear">חזרה לתמלול האוטומטי</button><button id="lyCancel">ביטול</button></div>
+</dialog>
+
+<dialog id="dlgText">
+  <h2 id="txTitle"></h2>
+  <input id="txInput">
+  <div class="btns"><button id="txOk" class="primary">שמירה</button><button id="txCancel">ביטול</button></div>
+</dialog>
+
+<dialog id="dlgConfirm">
+  <p id="cfText"></p>
+  <div class="btns"><button id="cfOk" class="danger">אישור</button><button id="cfCancel">ביטול</button></div>
+</dialog>
+
+<div id="toast"></div>
+<input type="file" id="fileInput" multiple accept="audio/*,video/*" class="hidden">
+<script src="app.js"></script>
+</body>
+</html>

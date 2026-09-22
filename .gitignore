@@ -1,0 +1,10 @@
+vendor/
+__pycache__/
+*.pyc
+/out/
+/dist/
+/build/
+/build/
+/release/
+build.log
+.claude/
