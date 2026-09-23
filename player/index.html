@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>נגן אקורדים</title>
+<!--
+  נגן עצמאי לקובצי שמע שיוצאו מתוכנת "אקורדים" (export-media).
+  קובץ אחד, בלי שרת ובלי אינטרנט: גוררים קובץ או בוחרים אותו, והוא קורא מתוכו
+  את ערוץ המילים ואת ערוץ האקורדים שהוטמעו בתגיות:
+    MP3  — ID3v2: SYLT (מילים), SYLT מסוג Chord (אקורדים), TXXX:CHORDS_JSON (הכול)
+    M4A  — atoms: ©lyr ו-com.chordsengine:CHORDS / CHORDS_JSON
+    FLAC — VORBIS_COMMENT: LYRICS / CHORDS / CHORDS_JSON
+  קובץ בלי תגיות כאלה פשוט ינוגן, בלי מילים.
+-->
+<style>
+:root {
+  --bg: #12151b; --panel: #1b2029; --panel2: #232a35; --text: #e7ebf2; --muted: #8e98a8;
+  --line: #2e3643; --accent: #6b9bff; --chord: #ffa45c; --mark: #5a4a12;
+  --size: 24px; color-scheme: dark;
+}
+:root.light {
+  --bg: #f6f7f9; --panel: #fff; --panel2: #eef1f5; --text: #1c2330; --muted: #6b7584;
+  --line: #dde2ea; --accent: #2f6fed; --chord: #c2410c; --mark: #ffe58a; color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: 'Segoe UI', Arial, sans-serif; }
+body { display: flex; flex-direction: column; }
+button, select { background: var(--panel2); color: inherit; border: 1px solid var(--line); border-radius: 7px; padding: 5px 10px; font: inherit; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 25%, transparent); }
+header { display: flex; gap: 14px; align-items: center; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.info { min-width: 0; flex: 1; }
+.info h1 { margin: 0; font-size: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.info .sub { color: var(--muted); font-size: 13px; }
+.now { text-align: center; min-width: 130px; }
+.now .c { font-size: 38px; font-weight: 800; color: var(--chord); direction: ltr; line-height: 1; }
+.now .n { color: var(--muted); font-size: 13px; } .now .n b { direction: ltr; display: inline-block; }
+.tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.val { min-width: 30px; text-align: center; display: inline-block; font-weight: 600; }
+main { flex: 1; overflow: auto; padding: 20px 6vw 45vh; font-size: var(--size); line-height: 1.5; }
+.sec { color: var(--muted); font-size: 13px; font-weight: 600; margin: 18px 0 4px; }
+.line { padding: 2px 8px; border-radius: 8px; }
+.line.on { background: color-mix(in srgb, var(--mark) 45%, transparent); }
+.lyr { display: flex; flex-wrap: wrap; align-items: flex-end; }
+.seg { display: inline-flex; flex-direction: column; align-items: flex-start; white-space: pre; }
+.seg .c { color: var(--chord); font-weight: 700; direction: ltr; unicode-bidi: isolate; font-size: .8em; min-height: 1.2em; padding-left: .45em; }
+.seg .c.hi { background: var(--chord); color: var(--bg); border-radius: 5px; padding: 0 .25em; }
+.seg .c.carried { opacity: .45; }
+.w.on { background: var(--mark); border-radius: 4px; }
+.inst { display: flex; gap: 6px; flex-wrap: wrap; direction: ltr; justify-content: flex-end; color: var(--chord); font-weight: 700; }
+.inst span { border: 1px solid var(--line); border-radius: 6px; padding: 0 12px; min-width: 62px; text-align: center; }
+.inst span.hi { background: var(--chord); color: var(--bg); }
+footer { display: flex; gap: 12px; align-items: center; padding: 8px 16px; background: var(--panel); border-top: 1px solid var(--line); flex-wrap: wrap; }
+.seek { flex: 1; display: flex; gap: 8px; align-items: center; direction: ltr; font-variant-numeric: tabular-nums; min-width: 260px; }
+.seek input { flex: 1; }
+#play { width: 44px; height: 44px; border-radius: 50%; background: var(--accent); color: #fff; border: none; font-size: 16px; }
+#drop { position: fixed; inset: 0; display: flex; flex-direction: column; gap: 14px; align-items: center; justify-content: center;
+  background: var(--bg); text-align: center; padding: 24px; z-index: 5; }
+#drop.drag { outline: 4px dashed var(--accent); outline-offset: -24px; }
+#drop h2 { margin: 0; font-size: 26px; } #drop p { color: var(--muted); max-width: 520px; margin: 0; }
+#drop.hide { display: none; }
+.err { color: #ff8585; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.chip { background: var(--panel2); border: 1px solid var(--line); border-radius: 20px; padding: 3px 12px; font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <div class="info"><h1 id="title">נגן אקורדים</h1><div class="sub" id="sub"></div></div>
+  <div class="now"><div class="c" id="curChord">–</div><div class="n">הבא: <b id="nextChord">–</b></div></div>
+  <div class="tools">
+    <button id="tDown" title="הורדת טון">−</button><span class="val" id="tVal">0</span><button id="tUp" title="העלאת טון">+</button>
+    <button id="fDown">A−</button><button id="fUp">A+</button>
+    <button id="scroll" class="on" title="גלילה אוטומטית">גלילה</button>
+    <button id="theme">☀</button>
+    <button id="open">קובץ אחר</button>
+  </div>
+</header>
+
+<main id="sheet"></main>
+
+<footer>
+  <button id="play">▶</button>
+  <div class="seek"><span id="cur">0:00</span><input type="range" id="seek" min="0" max="1000" value="0"><span id="dur">0:00</span></div>
+  <div class="tools">
+    <span style="color:var(--muted);font-size:13px">מהירות</span>
+    <button id="rDown">−</button><span class="val" id="rVal">100%</span><button id="rUp">+</button>
+    <button id="loopA">A</button><button id="loopB">B</button><span id="loopInfo" style="font-size:12px;color:var(--muted)"></span>
+  </div>
+</footer>
+
+<div id="drop">
+  <h2>🎸 נגן אקורדים</h2>
+  <p>גררו לכאן קובץ שמע שיוצא מתוכנת "אקורדים" (הקובץ בשם <b>… (אקורדים).mp3</b>) — או בחרו אותו.
+     הנגן קורא מתוך הקובץ את המילים והאקורדים ומציג אותם בזמן הנגינה.</p>
+  <button id="pick" style="font-size:17px;padding:10px 22px">בחירת קובץ</button>
+  <div class="chips"><span class="chip">MP3</span><span class="chip">M4A / MP4</span><span class="chip">FLAC</span><span class="chip">בלי אינטרנט</span></div>
+  <p id="err" class="err"></p>
+</div>
+
+<input type="file" id="file" accept="audio/*,video/mp4,.mp3,.m4a,.flac,.mp4" hidden>
+<audio id="audio"></audio>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const fmt = t => { t = Math.max(0, t || 0); return `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`; };
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const audio = $("audio");
+let song = null, transpose = 0, size = 24, loopA = null, loopB = null, rate = 1;
+
+/* ------------------------------------------------------------ קריאת תגיות */
+const dec = (buf, enc) => {   // קידודי ID3: 0 latin1, 1 UTF-16+BOM, 2 UTF-16BE, 3 UTF-8
+  const td = enc === 0 ? "latin1" : enc === 3 ? "utf-8" : enc === 2 ? "utf-16be" : "utf-16";
+  try { return new TextDecoder(td).decode(buf).replace(/\u0000+$/, ""); }
+  catch { return new TextDecoder("utf-8").decode(buf).replace(/\u0000+$/, ""); }
+};
+function readID3(bytes) {
+  const out = { text: {}, sylt: [], txxx: {} };
+  if (String.fromCharCode(...bytes.slice(0, 3)) !== "ID3") return out;
+  const ver = bytes[3], flags = bytes[5];
+  const syncsafe = o => (bytes[o] << 21) | (bytes[o + 1] << 14) | (bytes[o + 2] << 7) | bytes[o + 3];
+  let end = 10 + syncsafe(6);
+  let data = bytes.slice(10, end);
+  if (flags & 0x80) {                                   // unsynchronisation
+    const o = [];
+    for (let i = 0; i < data.length; i++) { o.push(data[i]); if (data[i] === 0xff && data[i + 1] === 0x00) i++; }
+    data = Uint8Array.from(o);
+  }
+  let p = 0;
+  while (p + 10 <= data.length) {
+    const id = String.fromCharCode(...data.slice(p, p + 4));
+    if (!/^[A-Z0-9]{4}$/.test(id)) break;
+    const sz = ver >= 4
+      ? (data[p + 4] << 21) | (data[p + 5] << 14) | (data[p + 6] << 7) | data[p + 7]
+      : (data[p + 4] << 24) | (data[p + 5] << 16) | (data[p + 6] << 8) | data[p + 7];
+    const body = data.slice(p + 10, p + 10 + sz);
+    p += 10 + sz;
+    if (!sz) continue;
+    if (id === "SYLT") {
+      const enc = body[0], type = body[5];
+      let i = 6;
+      const step = (enc === 1 || enc === 2) ? 2 : 1;
+      while (i < body.length && !(body[i] === 0 && (step === 1 || body[i + 1] === 0))) i += step;   // descriptor
+      i += step;
+      const items = [];
+      while (i + step <= body.length) {
+        let j = i;
+        while (j + step <= body.length && !(body[j] === 0 && (step === 1 || body[j + 1] === 0))) j += step;
+        const txt = dec(body.slice(i, j), enc);
+        j += step;
+        if (j + 4 > body.length) break;
+        const ms = (body[j] << 24 >>> 0) + (body[j + 1] << 16) + (body[j + 2] << 8) + body[j + 3];
+        items.push([ms, txt]);
+        i = j + 4;
+      }
+      out.sylt.push({ type, items });
+    } else if (id === "TXXX") {
+      const enc = body[0], step = (enc === 1 || enc === 2) ? 2 : 1;
+      let i = 1;
+      while (i < body.length && !(body[i] === 0 && (step === 1 || body[i + 1] === 0))) i += step;
+      out.txxx[dec(body.slice(1, i), enc)] = dec(body.slice(i + step), enc);
+    } else if (id === "USLT") {
+      const enc = body[0], step = (enc === 1 || enc === 2) ? 2 : 1;
+      let i = 4;
+      while (i < body.length && !(body[i] === 0 && (step === 1 || body[i + 1] === 0))) i += step;
+      out.text.USLT = dec(body.slice(i + step), enc);
+    } else if (id[0] === "T") {
+      out.text[id] = dec(body.slice(1), body[0]);
+    }
+  }
+  return out;
+}
+function readMP4(bytes) {
+  const out = { text: {}, txxx: {} };
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const str = (o, n) => String.fromCharCode(...bytes.slice(o, o + n));
+  (function walk(start, stop, path) {
+    let p = start;
+    while (p + 8 <= stop) {
+      let size = view.getUint32(p), type = str(p + 4, 4), head = 8;
+      if (size === 1) { size = Number(view.getBigUint64(p + 8)); head = 16; }
+      if (size < head || p + size > stop) break;
+      const inner = path + "/" + type;
+      if (["moov", "udta", "meta", "ilst"].includes(type)) walk(p + head + (type === "meta" ? 4 : 0), p + size, inner);
+      else if (path.endsWith("/ilst")) {
+        let q = p + head, mean = "", name = "", val = null;
+        while (q + 8 <= p + size) {
+          const s2 = view.getUint32(q), t2 = str(q + 4, 4);
+          if (s2 < 8) break;
+          const b = bytes.slice(q + 8, q + s2);
+          if (t2 === "data") val = new TextDecoder("utf-8").decode(b.slice(8));
+          if (t2 === "mean") mean = new TextDecoder("utf-8").decode(b.slice(4));
+          if (t2 === "name") name = new TextDecoder("utf-8").decode(b.slice(4));
+          q += s2;
+        }
+        if (val != null) {
+          if (type === "----") out.txxx[name] = val;
+          else out.text[type] = val;
+        }
+      }
+      p += size;
+    }
+  })(0, bytes.length, "");
+  return out;
+}
+function readFlac(bytes) {
+  const out = { text: {}, txxx: {} };
+  if (String.fromCharCode(...bytes.slice(0, 4)) !== "fLaC") return out;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let p = 4, last = false;
+  while (!last && p + 4 <= bytes.length) {
+    const flag = bytes[p], type = flag & 0x7f, size = (bytes[p + 1] << 16) | (bytes[p + 2] << 8) | bytes[p + 3];
+    last = !!(flag & 0x80);
+    if (type === 4) {
+      let q = p + 4;
+      const vlen = view.getUint32(q, true); q += 4 + vlen;
+      const n = view.getUint32(q, true); q += 4;
+      for (let i = 0; i < n; i++) {
+        const l = view.getUint32(q, true); q += 4;
+        const s = new TextDecoder("utf-8").decode(bytes.slice(q, q + l)); q += l;
+        const eq = s.indexOf("=");
+        if (eq > 0) out.txxx[s.slice(0, eq).toUpperCase()] = s.slice(eq + 1);
+      }
+    }
+    p += 4 + size;
+  }
+  return out;
+}
+const parseLrc = t => (t || "").split("\n").map(l => {
+  const m = l.match(/^\[(\d+):(\d+(?:\.\d+)?)\](.*)$/);
+  return m ? [Math.round((+m[1] * 60 + parseFloat(m[2])) * 1000), m[3]] : null;
+}).filter(Boolean);
+
+/* ------------------------------------------------------------ טעינת קובץ */
+async function loadFile(file) {
+  $("err").textContent = "";
+  const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+  let tagBytes, tags = { text: {}, txxx: {}, sylt: [] };
+  try {
+    if (String.fromCharCode(...head.slice(0, 3)) === "ID3") {
+      const h = new Uint8Array(await file.slice(0, 10).arrayBuffer());
+      const size = 10 + ((h[6] << 21) | (h[7] << 14) | (h[8] << 7) | h[9]);
+      tagBytes = new Uint8Array(await file.slice(0, size).arrayBuffer());
+      tags = readID3(tagBytes);
+    } else if (String.fromCharCode(...head) === "fLaC") {
+      tags = readFlac(new Uint8Array(await file.slice(0, Math.min(file.size, 4 << 20)).arrayBuffer()));
+    } else {
+      // MP4: התגיות יכולות להיות בהתחלה או בסוף הקובץ
+      tags = readMP4(new Uint8Array(await file.slice(0, Math.min(file.size, 8 << 20)).arrayBuffer()));
+      if (!Object.keys(tags.txxx).length && file.size > (8 << 20))
+        tags = readMP4(new Uint8Array(await file.slice(file.size - (8 << 20)).arrayBuffer()));
+    }
+  } catch (e) { console.warn(e); }
+
+  const jsonRaw = tags.txxx["CHORDS_JSON"] || tags.txxx["CHORDS_JSON\u0000"] || null;
+  let data = null;
+  try { data = jsonRaw ? JSON.parse(jsonRaw) : null; } catch (e) { console.warn("JSON פגום", e); }
+
+  const syltLyrics = (tags.sylt || []).find(s => s.type !== 5);
+  const syltChords = (tags.sylt || []).find(s => s.type === 5);
+  const lyricsLrc = syltLyrics ? syltLyrics.items : parseLrc(tags.text["\xa9lyr"] || tags.txxx["LYRICS"] || "");
+  const chordsLrc = syltChords ? syltChords.items : parseLrc(tags.txxx["CHORDS"] || "");
+
+  if (!data && !lyricsLrc.length && !chordsLrc.length) {
+    $("err").innerHTML = "בקובץ הזה אין מילים ואקורדים מוטמעים.<br>צריך לייצא אותו מהתוכנה: ייצוא → 🎧 קובץ השמע + מילים ואקורדים.";
+    if (!confirmPlayAnyway(file)) return;
+  }
+  song = buildSong(data, lyricsLrc, chordsLrc, tags, file);
+  transpose = 0; $("tVal").textContent = "0";
+  audio.src = URL.createObjectURL(file);
+  $("title").textContent = song.title;
+  $("sub").textContent = [song.artist, song.key && "סולם " + song.key, song.tempo && Math.round(song.tempo) + " BPM",
+    song.lines.length ? song.lines.length + " שורות" : "בלי מילים"].filter(Boolean).join(" · ");
+  $("drop").classList.add("hide");
+  render();
+  audio.play().catch(() => { });
+}
+function confirmPlayAnyway(file) {
+  const ok = confirm("אין בקובץ מילים ואקורדים. לנגן אותו בכל זאת?");
+  return ok;
+}
+function buildSong(data, lyricsLrc, chordsLrc, tags, file) {
+  const title = (data && data.meta && data.meta.title) || tags.text.TIT2 || tags.text["\xa9nam"] || file.name.replace(/\.[^.]+$/, "");
+  const artist = (data && data.meta && data.meta.artist) || tags.text.TPE1 || tags.text["\xa9ART"] || "";
+  if (data && data.lines) {
+    return { title, artist, key: data.meta.key, tempo: data.meta.tempo,
+             lines: data.lines, sections: data.sections || [], timeline: data.timeline || [] };
+  }
+  // בלי JSON: בונים שורות מהערוצים המסונכרנים בלבד
+  const timeline = chordsLrc.map(([ms, name], i) => ({
+    start: ms / 1000, end: (chordsLrc[i + 1] ? chordsLrc[i + 1][0] : (ms + 4000)) / 1000, name,
+  }));
+  const lines = lyricsLrc.map(([ms, text], i) => {
+    const start = ms / 1000, end = (lyricsLrc[i + 1] ? lyricsLrc[i + 1][0] / 1000 : start + 5);
+    const inside = timeline.filter(t => t.start >= start - 0.35 && t.start < end);
+    return { type: "lyric", start, end, text: text.replace(/^♪\s*/, ""),
+             words: [], chords: inside.map(t => ({ name: t.name, char: 0, time: t.start })) };
+  });
+  return { title, artist, key: tags.txxx.KEY || "", tempo: +(tags.txxx.BPM || 0), lines, sections: [], timeline };
+}
+
+/* ------------------------------------------------------------ טרנספוזיציה */
+const SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+const PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+function shiftName(name, n) {
+  if (!name || !n) return name;
+  const flats = /b/.test(name);
+  return name.replace(/([A-G])([#b]?)/g, (m, l, a) => {
+    let pc = (PC[l] + (a === "#" ? 1 : a === "b" ? -1 : 0) + n) % 12;
+    if (pc < 0) pc += 12;
+    return (flats ? FLAT : SHARP)[pc];
+  });
+}
+
+/* ------------------------------------------------------------ תצוגה */
+const SEC_NAMES = { verse: "בית", chorus: "פזמון", intro: "פתיחה", interlude: "מעבר", outro: "סיום", instrumental: "נגינה" };
+function render() {
+  const secs = new Map((song.sections || []).map(s => [s.id, s]));
+  let html = "", cur;
+  song.lines.forEach((ln, li) => {
+    if (ln.section && ln.section !== cur) {
+      cur = ln.section;
+      const s = secs.get(cur);
+      if (s) html += `<div class="sec">${esc((SEC_NAMES[s.kind] || s.kind) + (s.number ? " " + s.number : ""))}</div>`;
+    }
+    html += `<div class="line" data-li="${li}">${lineHtml(ln, li)}</div>`;
+  });
+  $("sheet").innerHTML = html || `<div class="sec">בקובץ אין מילים — האקורדים יוצגו למעלה בזמן הנגינה.</div>`;
+}
+function lineHtml(ln, li) {
+  const T = n => esc(shiftName(n, transpose));
+  if (ln.type === "instrumental") {
+    return `<div class="inst">${ln.chords.map((c, ci) => {
+      const bars = Math.min(8, Math.max(1, Math.round((c.beats || 4) / 4)));
+      const step = (c.duration || 0) / bars;
+      return Array.from({ length: bars }, (_, b) =>
+        `<span data-t="${(c.time + b * step).toFixed(2)}">${b ? "%" : T(c.name)}</span>`).join("");
+    }).join("")}</div>`;
+  }
+  const text = ln.text || "", chords = [...(ln.chords || [])].sort((a, b) => a.char - b.char);
+  const wordAt = new Array(text.length).fill(-1);
+  (ln.words || []).forEach((w, wi) => { for (let k = 0; k < w.text.length && w.char + k < text.length; k++) wordAt[w.char + k] = wi; });
+  const piece = (a, b) => {
+    let out = "", i = a;
+    while (i < b) {
+      let j = i + 1; while (j < b && wordAt[j] === wordAt[i]) j++;
+      out += `<span class="w" data-w="${wordAt[i]}">${esc(text.slice(i, j))}</span>`;
+      i = j;
+    }
+    return out;
+  };
+  const bounds = [...new Set([0, ...chords.map(c => Math.min(c.char, text.length))])].sort((a, b) => a - b);
+  let out = "";
+  bounds.forEach((a, k) => {
+    const b = k + 1 < bounds.length ? bounds[k + 1] : text.length;
+    const here = chords.filter(c => Math.min(c.char, text.length) === a);
+    const lab = here.map(c => `<span class="c${c.carried ? " carried" : ""}" data-t="${c.time}">${T(c.name)}</span>`).join(" ");
+    out += `<span class="seg"><span>${lab || `<span class="c">&nbsp;</span>`}</span><span class="t">${piece(a, b) || "&nbsp;"}</span></span>`;
+  });
+  return `<div class="lyr">${out}</div>`;
+}
+
+/* ------------------------------------------------------------ סנכרון */
+let last = {};
+function tick() {
+  requestAnimationFrame(tick);
+  if (!song) return;
+  const t = audio.currentTime;
+  if (loopA != null && loopB != null && t >= loopB) audio.currentTime = loopA;
+  if (audio.duration) { $("seek").value = t / audio.duration * 1000; $("cur").textContent = fmt(t); }
+  const tl = song.timeline || [];
+  let i = -1;
+  for (let k = 0; k < tl.length; k++) { if (tl[k].start <= t + 0.05) i = k; else break; }
+  const cur = i >= 0 && (tl[i].end == null || t < tl[i].end) ? shiftName(tl[i].name, transpose) : "–";
+  const nx = tl.slice(i + 1).find(x => x.name !== "N.C." && shiftName(x.name, transpose) !== cur);
+  if (cur !== last.cur) { $("curChord").textContent = cur; last.cur = cur; }
+  const nxName = nx ? shiftName(nx.name, transpose) : "–";
+  if (nxName !== last.nx) { $("nextChord").textContent = nxName; last.nx = nxName; }
+
+  let li = -1;
+  for (let k = 0; k < song.lines.length; k++) { if (song.lines[k].start <= t + 0.15) li = k; else break; }
+  if (li !== last.li) {
+    document.querySelectorAll(".line.on").forEach(e => e.classList.remove("on"));
+    const el = $("sheet").querySelector(`.line[data-li="${li}"]`);
+    if (el) { el.classList.add("on"); if ($("scroll").classList.contains("on")) el.scrollIntoView({ block: "center", behavior: "smooth" }); }
+    last.li = li; last.inner = null;
+  }
+  if (li < 0) return;
+  const ln = song.lines[li], el = $("sheet").querySelector(`.line[data-li="${li}"]`);
+  if (!el) return;
+  let ci = -1;
+  (ln.chords || []).forEach((c, k) => { if (c.time <= t + 0.05 && (ci < 0 || c.time >= ln.chords[ci].time)) ci = k; });
+  const wi = (ln.words || []).findIndex(w => w.start <= t && t < w.end);
+  const key = ci + ":" + wi;
+  if (key !== last.inner) {
+    last.inner = key;
+    el.querySelectorAll(".hi, .w.on").forEach(e => e.classList.remove("hi", "on"));
+    const marks = [...el.querySelectorAll("[data-t]")];
+    const active = marks.filter(m => +m.dataset.t <= t + 0.05).pop();
+    if (active) active.classList.add("hi");
+    if (wi >= 0) el.querySelectorAll(`.w[data-w="${wi}"]`).forEach(e => e.classList.add("on"));
+  }
+}
+requestAnimationFrame(tick);
+
+/* ------------------------------------------------------------ פקדים */
+$("pick").onclick = $("open").onclick = () => $("file").click();
+$("file").onchange = e => { if (e.target.files[0]) loadFile(e.target.files[0]); e.target.value = ""; };
+window.addEventListener("dragover", e => { e.preventDefault(); $("drop").classList.add("drag"); });
+window.addEventListener("dragleave", () => $("drop").classList.remove("drag"));
+window.addEventListener("drop", e => {
+  e.preventDefault(); $("drop").classList.remove("drag");
+  const f = e.dataTransfer.files[0]; if (f) loadFile(f);
+});
+$("play").onclick = () => audio.paused ? audio.play() : audio.pause();
+audio.onplay = () => $("play").textContent = "⏸";
+audio.onpause = () => $("play").textContent = "▶";
+audio.onloadedmetadata = () => $("dur").textContent = fmt(audio.duration);
+$("seek").oninput = () => { if (audio.duration) audio.currentTime = $("seek").value / 1000 * audio.duration; };
+$("sheet").onclick = e => { const m = e.target.closest("[data-t]"); if (m) audio.currentTime = +m.dataset.t; };
+const setT = n => { transpose = Math.max(-11, Math.min(11, n)); $("tVal").textContent = (transpose > 0 ? "+" : "") + transpose; if (song) { render(); last = {}; } };
+$("tUp").onclick = () => setT(transpose + 1); $("tDown").onclick = () => setT(transpose - 1); $("tVal").onclick = () => setT(0);
+const setSize = n => { size = Math.max(14, Math.min(60, n)); document.documentElement.style.setProperty("--size", size + "px"); };
+$("fUp").onclick = () => setSize(size + 2); $("fDown").onclick = () => setSize(size - 2);
+$("scroll").onclick = () => $("scroll").classList.toggle("on");
+$("theme").onclick = () => { const l = document.documentElement.classList.toggle("light"); $("theme").textContent = l ? "🌙" : "☀"; };
+const setRate = r => { rate = Math.round(Math.max(0.5, Math.min(1.5, r)) * 100) / 100; audio.playbackRate = rate; audio.preservesPitch = true; $("rVal").textContent = Math.round(rate * 100) + "%"; };
+$("rUp").onclick = () => setRate(rate + .05); $("rDown").onclick = () => setRate(rate - .05); $("rVal").onclick = () => setRate(1);
+function loopInfo() {
+  $("loopA").classList.toggle("on", loopA != null); $("loopB").classList.toggle("on", loopB != null);
+  $("loopInfo").textContent = loopA != null ? `${fmt(loopA)} → ${loopB != null ? fmt(loopB) : "…"}` : "";
+}
+$("loopA").onclick = () => { loopA = audio.currentTime; if (loopB != null && loopB <= loopA) loopB = null; loopInfo(); };
+$("loopB").onclick = () => { if (loopA == null) loopA = 0; if (audio.currentTime > loopA) loopB = audio.currentTime; else { loopA = loopB = null; } loopInfo(); };
+document.addEventListener("keydown", e => {
+  if (/INPUT|SELECT/.test(document.activeElement.tagName)) return;
+  const k = e.key;
+  if (k === " ") { e.preventDefault(); $("play").onclick(); }
+  else if (k === "ArrowLeft") audio.currentTime += 5;         // RTL: שמאלה = קדימה
+  else if (k === "ArrowRight") audio.currentTime -= 5;
+  else if (k === "ArrowUp") { e.preventDefault(); setT(transpose + 1); }
+  else if (k === "ArrowDown") { e.preventDefault(); setT(transpose - 1); }
+  else if (k.toLowerCase() === "l") $("loopB").onclick();
+  else if (k === "f" || k === "F11") document.documentElement.requestFullscreen?.();
+});
+</script>
+</body>
+</html>
