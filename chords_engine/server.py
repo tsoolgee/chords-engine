@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import __version__, audio, config, library, pipeline, render, theory
+from . import __version__, audio, config, embed, library, pipeline, render, theory
 from .editing import apply_edits
 from .jobs import JobQueue
 
@@ -316,6 +316,27 @@ class Handler(BaseHTTPRequestHandler):
         library.save(doc)
         self._json(render.render(doc, body.get("view") or q))
 
+    def export_media(self, q, sid):
+        """עותק של קובץ המקור עם המילים והאקורדים מוטמעים בתוכו (ID3/MP4/Vorbis)."""
+        doc = _song_or_404(sid)
+        b = self._body()
+        view = render.render(doc, b.get("view") or q)
+        src = Path(doc["source"]["path"])
+        name = (doc["meta"].get("title") or src.stem)
+        name = re.sub(r'[\/:*?"<>|]', "-", name) + " (אקורדים)" + src.suffix
+        if b.get("path"):
+            dst = Path(b["path"])
+        else:
+            folder = Path(b["dir"]) if b.get("dir") else src.parent
+            if not os.access(folder, os.W_OK):
+                folder = config.DATA_DIR / "exports"
+            dst = folder / name
+        try:
+            out = embed.export_media(view, src, dst)
+        except (ValueError, FileNotFoundError) as e:
+            raise ApiError(400, str(e))
+        self._json({"path": str(out), "size": out.stat().st_size})
+
     def export(self, q, sid):
         doc = _song_or_404(sid)
         fmt = q.get("format", "txt")
@@ -419,6 +440,7 @@ ROUTES = [
     (r"/api/songs/([0-9a-f]+)/reanalyze", "POST", Handler.reanalyze),
     (r"/api/songs/([0-9a-f]+)/lyrics", "POST", Handler.set_lyrics),
     (r"/api/songs/([0-9a-f]+)/export", "GET", Handler.export),
+    (r"/api/songs/([0-9a-f]+)/export-media", "POST", Handler.export_media),
     (r"/api/songs/([0-9a-f]+)/audio", "GET", Handler.song_audio),
     (r"/api/chord", "GET", Handler.chord_info),
     (r"/api/chords/vocabulary", "GET", Handler.chord_vocabulary),

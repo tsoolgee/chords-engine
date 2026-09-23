@@ -8,3 +8,4 @@ pywebview>=5
 # בנייה: pyinstaller
 # אופציונלי: הפרדת שירה לפני התמלול
 # demucs
+mutagen>=1.47

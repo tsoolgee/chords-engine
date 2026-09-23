@@ -225,6 +225,7 @@ completed{song_id}
 | ייצוא/ייבוא פרויקט כקובץ `.chords` (zip עם json + cover) לשיתוף | 🔧 קל |
 | TXT, ChordPro, LRC, JSON | ✅ |
 | CSV (ציר אקורדים ומילים עם זמנים) | ✅ |
+| **קובץ השמע המקורי עם ערוץ מילים וערוץ אקורדים מוטמעים** (ID3 SYLT / MP4 / Vorbis + JSON מלא) | ✅ |
 | DOCX | 🔧 קל (python-docx) |
 | PDF נקי לנגינה | 🎨 הדפסה מ-WebView2 (CSS ‎@media print) |
 | העתקה ללוח | 🎨 (תוכן ה-TXT) |

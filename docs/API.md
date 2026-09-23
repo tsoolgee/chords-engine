@@ -26,7 +26,8 @@ CORS פתוח, כך שגם ממשק שרץ בדפדפן או ב-WebView2 יכו�
 | POST | `/api/songs/{id}/reanalyze` | `{options}`: ניתוח מחדש של אותו קובץ → עבודה |
 | DELETE | `/api/songs/{id}` | מחיקה מהספרייה (קובץ השמע עצמו לא נמחק) |
 | GET | `/api/songs/{id}/raw` | המסמך השמור כמו שהוא, בסולם המקור |
-| GET | `/api/songs/{id}/export?format=txt\|chordpro\|lrc\|json&transpose=...` | קובץ להורדה |
+| GET | `/api/songs/{id}/export?format=txt\|chordpro\|lrc\|csv\|json&transpose=...` | קובץ להורדה |
+| POST | `/api/songs/{id}/export-media` | עותק של **קובץ השמע המקורי** עם המילים והאקורדים מוטמעים בתוכו |
 | GET | `/api/songs/{id}/audio` | קובץ השמע המקורי (תומך `Range`) |
 | GET | `/api/chord?name=Am7/G&notation=&accidentals=` | פענוח שם + אצבועים + תווים |
 | GET | `/api/chords/vocabulary?notation=` | שורשים וסוגי אקורדים לבורר |
@@ -133,3 +134,20 @@ es.onmessage = e => { const job = JSON.parse(e.data); render(job); if (job.statu
 `export?format=txt` מחזיר אקורדים מעל מילים, עם סימני כיוון (RLM), כך שהתוצאה מוצגת נכון
 בפנקס רשימות ובוואטסאפ. לתצוגה מדויקת צריך גופן ברוחב קבוע.
 `chordpro` מחזיר `[Am]` בתוך השורה, ועובד בכל אפליקציית ChordPro.
+
+## קובץ שמע עם מילים ואקורדים (`POST /api/songs/{id}/export-media`)
+
+גוף הבקשה: `{"view": {...}, "dir": "C:\...", "path": "C:\...\song.mp3"}` — כולם לא חובה.
+בלי `dir`/`path` הקובץ נשמר ליד המקור בשם `<שם השיר> (אקורדים).<סיומת>`. התשובה: `{"path", "size"}`.
+
+השמע עצמו לא נוגע — זה עותק מדויק של הקובץ המקורי, ורק התגיות נוספו:
+
+| פורמט | ערוץ המילים | ערוץ האקורדים | הכול |
+|---|---|---|---|
+| MP3 (ID3v2.4) | `SYLT` content-type 1 (מסונכרן) + `USLT` | `SYLT` content-type **5** (Chord) + `TXXX:CHORDS` (LRC) | `TXXX:CHORDS_JSON`, `TXXX:CHORDPRO` |
+| MP4 / M4A | `©lyr` (LRC) | `----:com.chordsengine:CHORDS` | `----:com.chordsengine:CHORDS_JSON` |
+| FLAC / OGG / Opus | `LYRICS` | `CHORDS` | `CHORDS_JSON`, `CHORDPRO` |
+
+נגן רגיל יראה את המילים המסונכרנות. נגן שכותבים בעצמו יכול לקרוא את `CHORDS_JSON`
+ולקבל את כל מה שה-API מחזיר: שורות, מיקום כל אקורד באות, זמנים, בתים, פעמות וסולם.
+בפייתון: `chords_engine.embed.read_embedded(path)` מחזיר את שלושת הערוצים.

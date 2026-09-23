@@ -301,37 +301,69 @@ def parse_key(s: str) -> Key:
     return Key(pc, minor)
 
 
-def detect_key(timeline: list[tuple[float, float, Chord]]) -> tuple[Optional[Key], float]:
-    """זיהוי סולם מתוך האקורדים (משוקלל לפי משך). מחזיר (סולם, ביטחון 0..1)."""
+def _rank_keys(timeline: list[tuple[float, float, Chord]]) -> list[tuple[float, "Key"]]:
+    """דירוג סולמות לפי פרופיל הצלילים (Krumhansl) + רמזים הרמוניים."""
     import numpy as np
     prof = np.zeros(12)
-    for start, end, ch in timeline:
-        if ch.is_none:
-            continue
-        dur = max(0.0, end - start)
+    played = [(s, e, ch) for s, e, ch in timeline if not ch.is_none and e > s]
+    for start, end, ch in played:
+        dur = end - start
         for i, pc in enumerate(ch.pitch_classes()):
             prof[pc] += dur * (1.5 if i == 0 else 1.0)      # שורש מקבל משקל יתר
     if prof.sum() == 0:
-        return None, 0.0
+        return []
+    dur_by, dom = {}, {}
+    for s, e, ch in played:
+        dur_by[(ch.root, ch.quality in MINORISH)] = dur_by.get((ch.root, ch.quality in MINORISH), 0.0) + e - s
+        if ch.quality in ("7", "9", "13", "7sus4"):
+            dom[(ch.root + 5) % 12] = dom.get((ch.root + 5) % 12, 0.0) + e - s
+    total = sum(dur_by.values()) or 1.0
+    first, last = played[0][2], played[-1][2]
+
+    def bonus(k: Key) -> float:
+        b = 0.0
+        if last.root == k.tonic and (last.quality in MINORISH) == k.minor:
+            b += 0.10                                       # שירים נגמרים על הטוניקה
+        if first.root == k.tonic and (first.quality in MINORISH) == k.minor:
+            b += 0.04
+        b += 0.10 * min(1.0, dom.get(k.tonic, 0.0) / total * 4)      # V7 -> I
+        b += 0.06 * min(1.0, dur_by.get((k.tonic, k.minor), 0.0) / total * 4)
+        return b
+
     scores = []
     for minor, base in ((False, _KK_MAJOR), (True, _KK_MINOR)):
         for t in range(12):
-            r = np.corrcoef(prof, np.roll(base, t))[0, 1]
-            scores.append((r, Key(t, minor)))
+            r = float(np.corrcoef(prof, np.roll(base, t))[0, 1])
+            k = Key(t, minor)
+            scores.append((r + bonus(k), k))
     scores.sort(key=lambda x: -x[0])
-    best, second = scores[0], scores[1]
-    # בין מז'ור למינור המקביל: האקורד הכי שכיח מכריע
-    if best[1].minor != second[1].minor and abs(best[0] - second[0]) < 0.05:
-        weight = {}
-        for s, e, ch in timeline:
-            if not ch.is_none:
-                weight[(ch.root, ch.quality in MINORISH)] = weight.get((ch.root, ch.quality in MINORISH), 0) + e - s
-        for r, k in (best, second):
-            if weight.get((k.tonic, k.minor), 0) >= max(weight.values()) * 0.8:
-                best = (r, k)
-                break
-    conf = float(max(0.0, min(1.0, (best[0] - scores[2][0]) * 5 + best[0] * 0.5)))
-    return best[1], round(conf, 2)
+    return scores
+
+
+def detect_key(timeline: list[tuple[float, float, Chord]], window: float = 60.0) -> tuple[Optional[Key], float]:
+    """זיהוי סולם מתוך האקורדים. הביטחון יורד כשחלקי השיר לא מסכימים
+    (מחרוזת או שיר עם מודולציה)."""
+    scores = _rank_keys(timeline)
+    if not scores:
+        return None, 0.0
+    best = scores[0]
+    conf = max(0.0, min(1.0, (best[0] - scores[2][0]) * 5 + best[0] * 0.5))
+    span = timeline[-1][1] - timeline[0][0] if timeline else 0.0
+    if span > window * 1.5:
+        agree = 0
+        chunks = 0
+        t = timeline[0][0]
+        while t < timeline[-1][1]:
+            part = [x for x in timeline if x[0] >= t and x[1] <= t + window]
+            t += window
+            sub = _rank_keys(part)
+            if not sub:
+                continue
+            chunks += 1
+            agree += sub[0][1] == best[1]
+        if chunks:
+            conf *= 0.3 + 0.7 * agree / chunks
+    return best[1], round(float(conf), 2)
 
 
 # ---------------------------------------------------------------- גיטרה

@@ -133,6 +133,44 @@ class RenderEditTests(unittest.TestCase):
         self.assertTrue(render.to_lrc(v).startswith("[ti:t]"))
 
 
+class EmbedTests(unittest.TestCase):
+    """ייצוא קובץ השמע המקורי עם ערוץ מילים וערוץ אקורדים, וקריאה חזרה."""
+
+    def test_mp3_roundtrip(self):
+        import av
+        import numpy as np
+        from chords_engine import embed
+        src = TMP / "tiny.mp3"
+        with av.open(str(src), "w") as c:
+            st = c.add_stream("mp3", rate=44100)
+            frame = av.AudioFrame.from_ndarray(np.zeros((1, 44100 * 2), dtype="int16"), format="s16", layout="mono")
+            frame.rate = 44100
+            for pkt in st.encode(frame):
+                c.mux(pkt)
+            for pkt in st.encode(None):
+                c.mux(pkt)
+        lines = align.build_lines(_words([("שלום", 1.0, 1.5, 0), ("עולם", 1.5, 2.5, 0)]))
+        out = align.attach_chords(lines, [{"start": 1.0, "end": 3.0, "label": "C:maj"}], 3.0, [])
+        doc = {"id": "abc", "engine_version": "test",
+               "meta": {"key": "C", "title": "בדיקה", "artist": "", "tempo": 100, "duration": 3.0},
+               "timeline": [{"start": 1.0, "end": 3.0, "label": "C:maj"}],
+               "sections": align.mark_sections(out), "lines": out}
+        dst = embed.export_media(render.render(doc), src, TMP / "tiny_tagged.mp3")
+        got = embed.read_embedded(dst)
+        self.assertEqual(got["lyrics"], [(1000, "שלום עולם")])
+        self.assertEqual(got["chords"], [(1000, "C")])
+        self.assertEqual(got["json"]["meta"]["key"], "C")
+        from mutagen.mp3 import MP3
+        self.assertAlmostEqual(MP3(src).info.length, MP3(dst).info.length, places=2)   # השמע לא השתנה
+
+    def test_rejects_unknown_format(self):
+        from chords_engine import embed
+        wav = TMP / "x.wav"
+        make_song(wav, seconds_per_chord=0.2)
+        with self.assertRaises(ValueError):
+            embed.export_media({"meta": {}, "lines": [], "timeline": []}, wav, TMP / "y.wav")
+
+
 class ServerTests(unittest.TestCase):
     """מריץ את השרת האמיתי על פורט פנוי ומנתח שיר סינתטי (אקורדים בלבד)."""
 

@@ -727,6 +727,15 @@ $("btnShowFile").onclick = () => native() ? native().open_folder(S.song.source.p
 document.querySelectorAll("[data-exp]").forEach(b => b.onclick = async () => {
   const f = b.dataset.exp;
   if (f === "pdf") return window.print();
+  if (f === "media") {                       // עותק של קובץ המקור עם ערוץ מילים וערוץ אקורדים
+    try {
+      toast("מכין קובץ…", 8000);
+      const r = await api("POST", `/songs/${S.songId}/export-media`, { view: S.v });
+      toast("נשמר: " + r.path, 8000);
+      if (native()) native().open_folder(r.path);
+    } catch (e) { toast(e.message, 6000); }
+    return;
+  }
   const q = new URLSearchParams({ format: f === "copy" ? "txt" : f, transpose: S.v.transpose, capo: S.v.capo, simplify: S.v.simplify, notation: S.v.notation, accidentals: S.v.accidentals });
   const r = await fetch(`/api/songs/${S.songId}/export?${q}`); let text = await r.text();
   text = text.replace(/^﻿/, "");
